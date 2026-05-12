@@ -677,6 +677,39 @@ html, body {
   text-overflow: ellipsis;
 }
 
+.hist-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.param-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-family: 'DM Mono', 'Fira Code', 'Courier New', monospace;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--gray-light);
+  color: var(--gray);
+  border: 0.5px solid var(--border-soft);
+}
+
+.param-pill em {
+  font-style: normal;
+  color: var(--dark);
+  margin-left: 2px;
+}
+
+.param-special {
+  background: var(--cobalt-light);
+  color: var(--cobalt);
+  border-color: rgba(26,79,191,0.2);
+}
+
+.param-special em { color: var(--cobalt-mid); }
+
 .hist-del {
   background: none;
   border: none;

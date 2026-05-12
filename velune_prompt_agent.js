@@ -141,6 +141,23 @@ function loadGuide() {
   } catch(e) {}
 }
 
+// ── MJ PARAM PARSER ──
+function parseMJParams(text) {
+  const paramStart = text.search(/\s--\w/);
+  if (paramStart === -1) return { cleanText: text, params: [] };
+
+  const cleanText = text.slice(0, paramStart).trim();
+  const paramStr = text.slice(paramStart + 1);
+  const params = [];
+
+  paramStr.split(/(?=--\w)/).forEach(part => {
+    const m = part.trim().match(/^--(\w+)(?:\s+(.+))?$/);
+    if (m) params.push({ key: m[1], value: (m[2] || '').trim() });
+  });
+
+  return { cleanText, params };
+}
+
 // ── HISTORY ──
 let historySelected = new Set();
 let histFilter = 'all';
@@ -172,9 +189,29 @@ function renderHistory() {
     return;
   }
 
+  // special params to highlight (프로필·무드보드·시드 등)
+  const SPECIAL_PARAMS = new Set(['seed','p','profile','sref','cref','no','iw']);
+
   list.innerHTML = filtered.map(item => {
     const checked = historySelected.has(item.id);
-    const preview = item.prompts[0]?.text?.slice(0, 90) + (item.prompts[0]?.text?.length > 90 ? '…' : '') || '';
+    const rawText = item.prompts[0]?.text || '';
+
+    let previewText, paramHtml = '';
+    if (item.tool === 'midjourney' && rawText) {
+      const { cleanText, params } = parseMJParams(rawText);
+      const base = cleanText || rawText;
+      previewText = base.slice(0, 90) + (base.length > 90 ? '…' : '');
+      if (params.length > 0) {
+        paramHtml = `<div class="hist-params">${params.map(p => {
+          const cls = SPECIAL_PARAMS.has(p.key) ? ' param-special' : '';
+          const val = p.value ? `: <em>${esc(p.value)}</em>` : '';
+          return `<span class="param-pill${cls}">--${p.key}${val}</span>`;
+        }).join('')}</div>`;
+      }
+    } else {
+      previewText = rawText.slice(0, 90) + (rawText.length > 90 ? '…' : '');
+    }
+
     return `
     <div class="hist-item${checked ? ' selected' : ''}" onclick="handleHistClick(event,${item.id})">
       <div class="hist-check-visual${checked ? ' checked' : ''}"></div>
@@ -184,7 +221,8 @@ function renderHistory() {
           <span class="hist-tag tool-tag">${toolLabels[item.tool]}</span>
           <span class="hist-date">${item.date}</span>
         </div>
-        <div class="hist-preview">${esc(preview)}</div>
+        <div class="hist-preview">${esc(previewText)}</div>
+        ${paramHtml}
         ${item.note ? `<div class="hist-note">"${esc(item.note)}"</div>` : ''}
       </div>
       <button class="hist-del" onclick="event.stopPropagation();deleteHistItem(${item.id})" aria-label="삭제">×</button>
