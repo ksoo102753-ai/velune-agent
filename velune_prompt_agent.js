@@ -12,40 +12,13 @@ let colors = [
   {hex:'#EAF4FB', name:'Watery White'},
 ];
 
-// ── API KEY ──
-function toggleApiPanel() {
-  const p = document.getElementById('apiPanel');
-  p.classList.toggle('open');
-}
-
-function saveApiKey() {
-  const val = document.getElementById('apiKeyInput').value.trim();
-  if (!val) return;
-  localStorage.setItem('velune_api_key', val);
-  updateApiStatus();
-  document.getElementById('apiPanel').classList.remove('open');
-}
-
-function updateApiStatus() {
-  const key = localStorage.getItem('velune_api_key');
-  const dot = document.getElementById('apiDot');
-  const label = document.getElementById('apiPillLabel');
-  if (key && key.startsWith('sk-')) {
-    dot.classList.add('ok');
-    label.textContent = 'API 연결됨';
-    document.getElementById('apiKeyInput').value = key;
-  } else {
-    dot.classList.remove('ok');
-    label.textContent = 'API 키 설정';
-  }
-}
-
 // ── TABS ──
 function switchTab(tab, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('pane-' + tab).classList.add('active');
+  if (tab === 'history') renderHistory();
 }
 
 // ── SECTION ──
@@ -168,126 +141,112 @@ function loadGuide() {
   } catch(e) {}
 }
 
-// ── BUILD SYSTEM PROMPT ──
-function buildSystem() {
-  const g = {
-    name: document.getElementById('g-name').value,
-    subtitle: document.getElementById('g-subtitle').value,
-    philosophy: document.getElementById('g-philosophy').value,
-    target: document.getElementById('g-target').value,
-    slogan: document.getElementById('g-slogan').value,
-    emotion: document.getElementById('g-emotion').value,
-    ing1name: document.getElementById('g-ing1name').value,
-    ing1desc: document.getElementById('g-ing1desc').value,
-    ing2name: document.getElementById('g-ing2name').value,
-    ing2desc: document.getElementById('g-ing2desc').value,
-    viskeys: document.getElementById('g-viskeys').value,
-    camera: document.getElementById('g-camera').value,
-    ref: document.getElementById('g-ref').value,
-    avoid: document.getElementById('g-avoid').value,
-    aim: document.getElementById('g-aim').value,
-  };
-  const colorStr = colors.map(c => `${c.name} (${c.hex})`).join(', ');
-  const toneStr = tones.join(' / ');
-  return `You are a professional creative director and prompt engineer for ${g.name}, a ${g.subtitle} brand.
+// ── HISTORY ──
+let historySelected = new Set();
+let histFilter = 'all';
 
-BRAND: ${g.name} — ${g.subtitle}
-SLOGAN: "${g.slogan}"
-TONE: ${toneStr}
-PHILOSOPHY: ${g.philosophy}
-TARGET: ${g.target}
-COLORS: ${colorStr}
-INGREDIENTS: ${g.ing1name}: ${g.ing1desc} | ${g.ing2name}: ${g.ing2desc}
-VISUAL KEYWORDS: ${g.viskeys}
-CAMERA: ${g.camera}
-REFERENCES: ${g.ref}
-EMOTIONAL DIRECTION: ${g.emotion}
-AVOID: ${g.avoid}
-AIM FOR: ${g.aim}
-
-OUTPUT FORMAT — JSON only, no markdown, no preamble:
-{"prompts":[{"tag":"label","text":"prompt"},...]}
-
-Generate 2-3 prompts for the requested tool and scene.
-Midjourney: include --ar, --style raw, --v 7
-Weave: motion description, duration, camera behavior
-C4D: shader settings, simulation approach, render notes
-all: one prompt per tool`;
+function saveToHistory(tool, scene, note, prompts) {
+  const history = JSON.parse(localStorage.getItem('velune_history') || '[]');
+  history.unshift({
+    id: Date.now(),
+    tool, scene, note,
+    prompts,
+    date: new Date().toLocaleDateString('ko-KR', {month:'2-digit', day:'2-digit'})
+  });
+  if (history.length > 200) history.splice(200);
+  localStorage.setItem('velune_history', JSON.stringify(history));
 }
 
-// ── GENERATE ──
+function loadHistory() {
+  return JSON.parse(localStorage.getItem('velune_history') || '[]');
+}
+
+function renderHistory() {
+  const history = loadHistory();
+  const list = document.getElementById('histList');
+  const filtered = histFilter === 'all' ? history : history.filter(h => h.scene === histFilter);
+
+  if (filtered.length === 0) {
+    list.innerHTML = `<div class="hist-empty">${histFilter === 'all' ? '아직 생성된 프롬프트가 없어요.' : '이 카테고리에 저장된 프롬프트가 없어요.'}</div>`;
+    updateSelCount();
+    return;
+  }
+
+  list.innerHTML = filtered.map(item => {
+    const checked = historySelected.has(item.id);
+    const preview = item.prompts[0]?.text?.slice(0, 90) + (item.prompts[0]?.text?.length > 90 ? '…' : '') || '';
+    return `
+    <div class="hist-item${checked ? ' selected' : ''}" onclick="handleHistClick(event,${item.id})">
+      <div class="hist-check-visual${checked ? ' checked' : ''}"></div>
+      <div class="hist-body">
+        <div class="hist-meta">
+          <span class="hist-tag scene-tag">${sceneLabels[item.scene]}</span>
+          <span class="hist-tag tool-tag">${toolLabels[item.tool]}</span>
+          <span class="hist-date">${item.date}</span>
+        </div>
+        <div class="hist-preview">${esc(preview)}</div>
+        ${item.note ? `<div class="hist-note">"${esc(item.note)}"</div>` : ''}
+      </div>
+      <button class="hist-del" onclick="event.stopPropagation();deleteHistItem(${item.id})" aria-label="삭제">×</button>
+    </div>`;
+  }).join('');
+
+  updateSelCount();
+}
+
+function handleHistClick(event, id) {
+  if (historySelected.has(id)) historySelected.delete(id);
+  else historySelected.add(id);
+  renderHistory();
+}
+
+function updateSelCount() {
+  const count = historySelected.size;
+  document.getElementById('selCount').textContent = `${count}개 선택됨`;
+  document.getElementById('recombineBar').classList.toggle('visible', count >= 2);
+}
+
+function clearHistSelection() {
+  historySelected.clear();
+  renderHistory();
+}
+
+function deleteHistItem(id) {
+  if (!confirm('이 프롬프트를 히스토리에서 삭제할까요?')) return;
+  const history = loadHistory().filter(h => h.id !== id);
+  localStorage.setItem('velune_history', JSON.stringify(history));
+  historySelected.delete(id);
+  renderHistory();
+}
+
+function copySelected() {
+  const history = loadHistory();
+  const selected = history.filter(h => historySelected.has(h.id));
+  if (selected.length === 0) return;
+  const text = selected.map(h => h.prompts.map(p => p.text).join('\n')).join('\n\n---\n\n');
+  navigator.clipboard.writeText(text);
+  const btn = document.getElementById('recombineBtn');
+  btn.textContent = '✓ 복사됨';
+  setTimeout(() => { btn.textContent = '복사'; }, 1500);
+}
+
+// ── ADD PROMPT ──
 const toolLabels = {midjourney:'Midjourney', weave:'Weave', c4d:'Cinema 4D', all:'전체 세트'};
 const sceneLabels = {product:'제품 샷', texture:'제형 텍스처', model:'모델 클로즈샷', botanical:'보태니컬', atmosphere:'분위기 컷', opening:'오프닝/엔딩'};
 
-async function generate() {
-  const apiKey = localStorage.getItem('velune_api_key');
-  if (!apiKey || !apiKey.startsWith('sk-')) {
-    document.getElementById('apiPanel').classList.add('open');
-    document.getElementById('apiKeyInput').focus();
+function addPrompt() {
+  const text = document.getElementById('promptInput').value.trim();
+  if (!text) {
+    document.getElementById('promptInput').focus();
     return;
   }
-  const userNote = document.getElementById('userNote').value.trim();
-  const btn = document.getElementById('generateBtn');
-  const output = document.getElementById('outputArea');
-  btn.disabled = true;
-  output.innerHTML = `<div class="output-card"><div class="output-body thinking"><div class="spinner"></div>VELUNE 브랜드 기반 생성 중...</div></div>`;
-
-  const userMsg = `Tool: ${toolLabels[selectedTool]}\nScene: ${sceneLabels[selectedScene]}\nDirection: ${userNote || '없음'}`;
-
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: buildSystem(),
-        messages: [{ role: 'user', content: userMsg }]
-      })
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error.message);
-    const raw = data.content?.map(c => c.text || '').join('');
-    const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
-
-    const allText = parsed.prompts.map(p => p.text).join('\n\n---\n\n');
-    navigator.clipboard.writeText(allText).catch(()=>{});
-
-    let html = `<div class="output-card">
-      <div class="output-header">
-        <div class="output-meta">
-          <span class="output-label">${toolLabels[selectedTool]} · ${sceneLabels[selectedScene]}</span>
-          <span class="copied-badge show" id="autoBadge">✓ 자동 복사됨</span>
-        </div>
-        <button class="recopy-btn" onclick="recopyCurrent(this)">다시 복사</button>
-      </div>
-      <div class="output-body" id="promptOutput">`;
-    parsed.prompts.forEach(p => {
-      html += `<div class="prompt-block"><span class="prompt-tag">${p.tag}</span><div class="prompt-text">${esc(p.text)}</div></div>`;
-    });
-    html += `</div></div>`;
-    output.innerHTML = html;
-    setTimeout(() => {
-      const b = document.getElementById('autoBadge');
-      if (b) b.classList.remove('show');
-    }, 3000);
-  } catch(err) {
-    output.innerHTML = `<div class="output-card"><div class="output-body thinking" style="color:#E24B4A">오류: ${err.message}</div></div>`;
-  }
-  btn.disabled = false;
-}
-
-function recopyCurrent(btn) {
-  const blocks = document.querySelectorAll('.prompt-text');
-  const text = Array.from(blocks).map(b => b.textContent).join('\n\n---\n\n');
-  navigator.clipboard.writeText(text);
-  btn.textContent = '✓ 복사됨';
-  setTimeout(() => { btn.textContent = '다시 복사'; }, 1500);
+  const note = document.getElementById('userNote').value.trim();
+  saveToHistory(selectedTool, selectedScene, note, [{tag: toolLabels[selectedTool], text}]);
+  document.getElementById('promptInput').value = '';
+  document.getElementById('userNote').value = '';
+  const toast = document.getElementById('addToast');
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2000);
 }
 
 function esc(s) {
@@ -309,8 +268,16 @@ document.getElementById('sceneGrid').addEventListener('click', e => {
   b.classList.add('active');
 });
 
+// ── HIST FILTER ──
+document.getElementById('histFilter').addEventListener('click', e => {
+  const b = e.target.closest('.hist-cat'); if (!b) return;
+  histFilter = b.dataset.cat;
+  document.querySelectorAll('.hist-cat').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  renderHistory();
+});
+
 // ── INIT ──
 loadGuide();
 initTags();
 renderColors();
-updateApiStatus();
